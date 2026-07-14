@@ -29,6 +29,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, response: getMockResponse(message) });
     }
 
+    const ai = new GoogleGenerativeAI(apiKey);
+
+    // 디버깅: 사용 가능한 모델 목록을 로그에 출력
+    try {
+      const modelsList = await (ai as any).listModels();
+      console.log("Google AI Studio 사용 가능한 모델 목록:", modelsList.models.map((m: any) => m.name));
+    } catch (listError) {
+      console.error("모델 목록 조회 실패 (API 키 권한 오류 의심):", listError);
+    }
+
     // 2. 데이터베이스 메타데이터 동적 조회
     const [movies, theaters, screens, showtimes] = await Promise.all([
       prisma.movie.findMany(),
@@ -90,7 +100,6 @@ ${showtimesContext}
 `;
 
     // 5. Gemini API SDK 연결 및 세션 개설
-    const ai = new GoogleGenerativeAI(apiKey);
     const model = ai.getGenerativeModel({
       model: "gemini-1.5-flash-latest",
       systemInstruction: systemInstruction,
