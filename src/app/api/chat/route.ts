@@ -92,7 +92,7 @@ ${showtimesContext}
     // 5. Gemini API SDK 연결 및 세션 개설
     const ai = new GoogleGenerativeAI(apiKey);
     const model = ai.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: "gemini-1.5-flash-latest",
       systemInstruction: systemInstruction,
     });
 
