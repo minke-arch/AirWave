@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 import { prisma } from "../../../lib/db";
 
 // API 키가 할당되지 않은 경우를 대비한 가상 응답 헬퍼
 const getMockResponse = (message: string) => {
   const msg = message.toLowerCase();
   if (msg.includes("영화") || msg.includes("상영")) {
-    return "현재 에어웨이브 서울본점에서는 [모아나 2], [호프], [스파이더맨], [인셉션]이 상영 중입니다. 상세 시간표는 상단의 '예매·예약' 탭에서 확인하실 수 있습니다! (※ AI Studio API 키 설정 시 더 똑똑한 실시간 상담이 가능합니다.)";
+    return "현재 에어웨이브 서울본점에서는 [모아나 2], [호프], [스파이더맨], [인셉션]이 상영 중입니다. 상세 시간표는 상단의 '예매·예약' 탭에서 확인하실 수 있습니다! (※ Groq API 키 설정 시 더 똑똑한 실시간 상담이 가능합니다.)";
   }
   if (msg.includes("좌석") || msg.includes("관")) {
     return "저희 극장은 1관부터 6관까지 있으며, 각 관별로 약 120석에서 200석 규모의 쾌적한 좌석(프리미엄석, 장애인석 포함)이 준비되어 있습니다. 상세 좌석 지정은 시간표 선택 후 진행해 주세요!";
@@ -22,14 +22,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "메시지가 비어 있습니다." }, { status: 400 });
     }
 
-    // 1. API 키 확인
-    const rawApiKey = process.env.GEMINI_API_KEY;
+    // 1. API 키 확인 (Groq API 키 로드)
+    const rawApiKey = process.env.GROQ_API_KEY;
     if (!rawApiKey) {
-      console.warn("GEMINI_API_KEY 환경변수가 설정되지 않았습니다. 간이 응답 모드로 동작합니다.");
+      console.warn("GROQ_API_KEY 환경변수가 설정되지 않았습니다. 간이 응답 모드로 동작합니다.");
       return NextResponse.json({ success: true, response: getMockResponse(message) });
     }
 
-    // API 키 양끝의 공백 및 큰따옴표/작은따옴표가 잘못 묻어난 경우를 대비해 살균(Sanitize) 처리
+    // API 키 살균(Sanitize) 처리
     const apiKey = rawApiKey.trim().replace(/^["']|["']$/g, "");
 
     // 2. 데이터베이스 메타데이터 동적 조회
@@ -86,39 +86,39 @@ ${showtimesContext}
 
 [답변 원칙 및 지침]
 1. 반드시 위의 정보(영화 리스트, 상영관, 시간표)에 존재하는 사실만을 기반으로 정직하게 대답하십시오. 
-2. 여기에 없는 영화 정보나 상영 일정을 임의로 지어내어 추천하지 마십시오. (예: 아바타가 상영 중이냐고 물어보면 상영 정보에 없으므로 상영하지 않는다고 정확히 답해야 합니다.)
+2. 여기에 없는 영화 정보나 상영 일정을 임의로 지어내어 추천하지 마십시오. (예: 아바타가 상영 중이냐고 물어보면 상영하지 않는다고 정확히 답해야 합니다.)
 3. 답변은 2~3줄 이내로 핵심만 명확하게 제공하며, 말투는 한글 존댓말로 매우 상냥하고 친절하게 답변하십시오. (이모지 적극 사용 권장)
 4. 만약 사용자가 직접 예매나 결제를 원할 경우, 화면 하단 네비게이션바 정중앙의 '예매·예약' 붉은색 버튼을 통해 예매를 시작할 수 있다고 친절하게 안내하십시오.
 5. 티켓 구매 취소는 마이페이지('더보기' 탭)의 예매 내역에서 30분 전까지 가능하다고 친절하게 안내하십시오.
 `;
 
-    // 5. Gemini API SDK 연결 및 세션 개설
-    const ai = new GoogleGenerativeAI(apiKey);
-    const model = ai.getGenerativeModel({
-      model: "gemini-2.0-flash",
-      systemInstruction: systemInstruction,
-    });
+    // 5. Groq SDK 연결 및 대화 요청
+    const groq = new Groq({ apiKey });
 
-    // 멀티턴 대화 기록(history) 포맷팅
-    // SDK 포맷에 맞춰 유저와 모델의 롤을 user, model로 변환
-    const geminiHistory = (history || []).map((chat: any) => ({
-      role: chat.sender === "user" ? "user" : "model",
-      parts: [{ text: chat.text }],
+    // 멀티턴 대화 기록(history) 변환 (user, assistant 역할 설정)
+    const groqHistory = (history || []).map((chat: any) => ({
+      role: chat.sender === "user" ? "user" : "assistant",
+      content: chat.text,
     }));
 
-    const chatSession = model.startChat({
-      history: geminiHistory,
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        { role: "system", content: systemInstruction },
+        ...groqHistory,
+        { role: "user", content: message }
+      ],
+      model: "llama-3.3-70b-versatile",
+      temperature: 0.7,
     });
 
-    const result = await chatSession.sendMessage(message);
-    const responseText = result.response.text();
+    const responseText = chatCompletion.choices[0].message.content || "";
 
     return NextResponse.json({
       success: true,
       response: responseText.trim(),
     });
   } catch (error: any) {
-    console.error("Gemini 챗봇 API 내부 오류:", error);
+    console.error("Groq 챗봇 API 내부 오류:", error);
     return NextResponse.json(
       { success: false, error: "서버 오류로 인해 대화를 처리하지 못했습니다." },
       { status: 500 }
