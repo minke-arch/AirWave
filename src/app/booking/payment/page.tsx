@@ -10,11 +10,6 @@ import {
   ChevronUp, 
   ChevronRight, 
   Search, 
-  Check, 
-  CreditCard,
-  Smartphone,
-  BookOpen,
-  DollarSign,
   Loader2
 } from "lucide-react";
 
@@ -36,9 +31,12 @@ export default function PaymentPage() {
   const [selectedMethod, setSelectedMethod] = useState<string>("앱카드");
   const [agreeAll, setAgreeAll] = useState<boolean>(true);
   const [isPaying, setIsPaying] = useState<boolean>(false);
+  const [isPaymentSuccess, setIsPaymentSuccess] = useState<boolean>(false);
 
   // Validate state on mount
   useEffect(() => {
+    if (isPaymentSuccess) return;
+
     if (!selectedMovie || !selectedTime || selectedSeats.length === 0) {
       router.replace("/booking");
       return;
@@ -47,7 +45,7 @@ export default function PaymentPage() {
       router.replace("/mypage?redirect=/booking/seats");
       return;
     }
-  }, [selectedMovie, selectedTime, selectedSeats, user, router]);
+  }, [selectedMovie, selectedTime, selectedSeats, user, router, isPaymentSuccess]);
 
   if (!selectedMovie || !selectedTime || selectedSeats.length === 0) return null;
 
@@ -64,15 +62,14 @@ export default function PaymentPage() {
     return `${dateStr.replace(/-/g, ".")} (${days[d.getDay()]})`;
   };
 
-  const handlePaymentSubmit = () => {
+  const handlePaymentSubmit = async () => {
     if (!agreeAll || isPaying) return;
     
     setIsPaying(true);
 
-    // Simulated network processing delay
-    setTimeout(() => {
-      // Create new reservation and save to LocalStorage
-      addReservation({
+    try {
+      // 1. Send reserve request to backend (Hold conversion to Reservation)
+      await addReservation({
         movie: {
           id: selectedMovie.id,
           title: selectedMovie.title,
@@ -86,10 +83,17 @@ export default function PaymentPage() {
         totalPrice: totalPrice,
       });
 
-      setIsPaying(false);
+      // 2. Success transition
+      setIsPaymentSuccess(true);
       clearBookingFlow();
       router.push("/ticket"); // Route to ticket screen
-    }, 1800);
+    } catch (err: any) {
+      console.error("결제 승인 처리 실패:", err);
+      alert(err.message || "예매 결제 처리 중 오류가 발생했습니다. 좌석이 이미 점유되었을 수 있으니 예매를 다시 진행해 주세요.");
+      router.push("/booking"); // 예매 초기 단계로 안내
+    } finally {
+      setIsPaying(false);
+    }
   };
 
   return (

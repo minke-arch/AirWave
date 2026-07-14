@@ -5,8 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Layout } from "../../components/Layout";
 import { useBooking, Movie, Showtime } from "../../context/BookingContext";
-import { dummyMovies, getShowtimes } from "../../data/movies";
-import { X, Sun } from "lucide-react";
+import { X, Sun, Loader2 } from "lucide-react";
 
 export default function BookingPage() {
   const router = useRouter();
@@ -21,7 +20,10 @@ export default function BookingPage() {
   } = useBooking();
 
   const [timeFilter, setTimeFilter] = useState<string>("전체");
-  const [occupiedMap, setOccupiedMap] = useState<Record<string, string[]>>({});
+  const [movies, setMovies] = useState<Movie[]>([]);
+  const [showtimes, setShowtimes] = useState<Showtime[]>([]);
+  const [isLoadingMovies, setIsLoadingMovies] = useState<boolean>(true);
+  const [isLoadingShowtimes, setIsLoadingShowtimes] = useState<boolean>(false);
 
   // Generate 7 days starting from Wednesday, July 15, 2026 to match screenshots
   const dates = React.useMemo(() => {
@@ -41,23 +43,55 @@ export default function BookingPage() {
     return list;
   }, []);
 
-  // Pre-select first movie & date on load if not set
+  // 1. Fetch active movies on mount
   useEffect(() => {
-    if (!selectedMovie) {
-      selectMovie(dummyMovies[0]);
-    }
+    const fetchMovies = async () => {
+      try {
+        const res = await fetch("/api/movies");
+        const data = await res.json();
+        if (data.success) {
+          setMovies(data.movies);
+          // Pre-select first movie if not selected
+          if (!selectedMovie && data.movies.length > 0) {
+            selectMovie(data.movies[0]);
+          }
+        }
+      } catch (err) {
+        console.error("영화 로드 실패:", err);
+      } finally {
+        setIsLoadingMovies(false);
+      }
+    };
+
+    fetchMovies();
+
     if (!selectedDate) {
       selectDate(dates[0].formatted);
     }
+  }, []);
 
-    // Load occupied seats from LocalStorage to dynamically calculate remaining seat counts
-    if (typeof window !== "undefined") {
-      const storedOccupied = localStorage.getItem("movie_occupied_seats");
-      if (storedOccupied) {
-        setOccupiedMap(JSON.parse(storedOccupied));
+  // 2. Fetch showtimes when selected movie or date changes
+  useEffect(() => {
+    const fetchShowtimes = async () => {
+      if (!selectedMovie || !selectedDate) return;
+      setIsLoadingShowtimes(true);
+      try {
+        const res = await fetch(
+          `/api/showtimes?movieId=${encodeURIComponent(selectedMovie.id)}&date=${encodeURIComponent(selectedDate)}`
+        );
+        const data = await res.json();
+        if (data.success) {
+          setShowtimes(data.showtimes);
+        }
+      } catch (err) {
+        console.error("상영일정 로드 실패:", err);
+      } finally {
+        setIsLoadingShowtimes(false);
       }
-    }
-  }, [selectedMovie, selectedDate, dates, selectMovie, selectDate]);
+    };
+
+    fetchShowtimes();
+  }, [selectedMovie, selectedDate]);
 
   const handleMovieSelect = (movie: Movie) => {
     selectMovie(movie);
@@ -68,15 +102,7 @@ export default function BookingPage() {
   };
 
   const handleShowtimeSelect = (timeInfo: Showtime) => {
-    // Inject globally occupied seats count into showtime context
-    const occupiedKey = `${selectedMovie?.id}_${selectedDate}_${timeInfo.time}`;
-    const occupiedSeatsList = occupiedMap[occupiedKey] || [];
-    const fullTimeInfo = {
-      ...timeInfo,
-      occupiedSeats: occupiedSeatsList
-    };
-    
-    selectTime(fullTimeInfo);
+    selectTime(timeInfo);
 
     if (!user) {
       if (window.confirm("예매를 진행하려면 로그인이 필요합니다. 로그인 페이지로 이동하시겠습니까?")) {
@@ -88,11 +114,8 @@ export default function BookingPage() {
     router.push("/booking/seats");
   };
 
-  // Get active showtimes based on selected movie & date
-  const baseShowtimes = selectedMovie ? getShowtimes(selectedMovie.id, selectedDate) : [];
-
   // Filter showtimes based on selected time-slot filter
-  const filteredShowtimes = baseShowtimes.filter((st) => {
+  const filteredShowtimes = showtimes.filter((st) => {
     if (timeFilter === "전체") return true;
     const hour = parseInt(st.time.split(":")[0]);
     if (timeFilter === "오전") return hour < 12;
@@ -121,39 +144,43 @@ export default function BookingPage() {
           </Link>
         </div>
 
-
-
         {/* Movie Poster Horizontal Picker */}
-        <div className="bg-gray-50 py-4 px-4 overflow-x-auto scrollbar-none flex items-center space-x-4 snap-x snap-mandatory">
-          {dummyMovies.map((movie) => {
-            const isSelected = selectedMovie?.id === movie.id;
-            return (
-              <div
-                key={movie.id}
-                onClick={() => handleMovieSelect(movie)}
-                className={`w-[110px] shrink-0 snap-center flex flex-col items-center cursor-pointer transition-all duration-200 ${
-                  isSelected ? "scale-105" : "opacity-50 hover:opacity-85"
-                }`}
-              >
-                {/* Poster Frame */}
-                <div className={`w-full aspect-[2/3] rounded-xl overflow-hidden shadow bg-gray-200 relative border-2 ${
-                  isSelected ? "border-[#E71A0F] shadow-rose-500/10" : "border-transparent"
-                }`}>
-                  <img src={movie.poster} alt={movie.title} className="w-full h-full object-cover" />
-                  
-                  {/* Rating Indicator Overlay */}
-                  <span className={`absolute top-1.5 left-1.5 text-[8px] font-black w-4.5 h-4.5 flex items-center justify-center rounded text-white select-none ${
-                    movie.ageLimit === "All" ? "bg-green-500" :
-                    movie.ageLimit === "12" ? "bg-yellow-500" :
-                    movie.ageLimit === "15" ? "bg-orange-500" :
-                    movie.ageLimit === "Restricted" ? "bg-red-500" : "bg-gray-400"
+        <div className="bg-gray-50 py-4 px-4 overflow-x-auto scrollbar-none flex items-center space-x-4 snap-x snap-mandatory min-h-[140px]">
+          {isLoadingMovies ? (
+            <div className="w-full flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-[#E71A0F]" />
+            </div>
+          ) : (
+            movies.map((movie) => {
+              const isSelected = selectedMovie?.id === movie.id;
+              return (
+                <div
+                  key={movie.id}
+                  onClick={() => handleMovieSelect(movie)}
+                  className={`w-[110px] shrink-0 snap-center flex flex-col items-center cursor-pointer transition-all duration-200 ${
+                    isSelected ? "scale-105" : "opacity-50 hover:opacity-85"
+                  }`}
+                >
+                  {/* Poster Frame */}
+                  <div className={`w-full aspect-[2/3] rounded-xl overflow-hidden shadow bg-gray-200 relative border-2 ${
+                    isSelected ? "border-[#E71A0F] shadow-rose-500/10" : "border-transparent"
                   }`}>
-                    {movie.ageLimit === "All" ? "전체" : movie.ageLimit}
-                  </span>
+                    <img src={movie.poster} alt={movie.title} className="w-full h-full object-cover" />
+                    
+                    {/* Rating Indicator Overlay */}
+                    <span className={`absolute top-1.5 left-1.5 text-[8px] font-black w-4.5 h-4.5 flex items-center justify-center rounded text-white select-none ${
+                      movie.ageLimit === "All" ? "bg-green-500" :
+                      movie.ageLimit === "12" ? "bg-yellow-500" :
+                      movie.ageLimit === "15" ? "bg-orange-500" :
+                      movie.ageLimit === "Restricted" ? "bg-red-500" : "bg-gray-400"
+                    }`}>
+                      {movie.ageLimit === "All" ? "전체" : movie.ageLimit}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
 
         {/* Selected Movie Meta Summary Banner */}
@@ -235,29 +262,33 @@ export default function BookingPage() {
             </div>
           )}
 
+          {/* Loading Indicator */}
+          {isLoadingShowtimes && (
+            <div className="flex-1 flex flex-col items-center justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-[#E71A0F]" />
+            </div>
+          )}
+
           {/* Timetable showtime cards list */}
-          {(selectedMovie?.id !== "spiderman" || selectedDate >= "2026-07-20") && filteredShowtimes.length === 0 && (
+          {!isLoadingShowtimes && (selectedMovie?.id !== "spiderman" || selectedDate >= "2026-07-20") && filteredShowtimes.length === 0 && (
             <div className="flex-1 flex flex-col items-center justify-center py-12 text-gray-400 text-xs">
               선택한 필터 조건의 상영 스케줄이 없습니다.
             </div>
           )}
 
-          {(selectedMovie?.id !== "spiderman" || selectedDate >= "2026-07-20") && filteredShowtimes.length > 0 && (
+          {!isLoadingShowtimes && (selectedMovie?.id !== "spiderman" || selectedDate >= "2026-07-20") && filteredShowtimes.length > 0 && (
             <div className="grid grid-cols-3 gap-3">
-              {filteredShowtimes.map((st, idx) => {
-                const occupiedKey = `${selectedMovie?.id}_${selectedDate}_${st.time}`;
-                const occupiedList = occupiedMap[occupiedKey] || [];
-                const occupiedCount = occupiedList.length;
-                const remaining = Math.max(st.totalSeats - occupiedCount, 0);
+              {filteredShowtimes.map((st) => {
+                const remaining = Math.max(st.totalSeats - st.occupiedSeats.length, 0);
 
                 // Early morning discount (before 11:00 AM)
                 const isMorning = parseInt(st.time.split(":")[0]) < 11;
 
                 return (
                   <button
-                    key={idx}
+                    key={st.id}
                     onClick={() => handleShowtimeSelect(st)}
-                    className="flex flex-col items-center p-3 bg-white border border-gray-200 hover:border-[#E71A0F] hover:shadow-md rounded-xl transition-all text-left"
+                    className="flex flex-col items-center p-3 bg-white border border-gray-200 hover:border-[#E71A0F] hover:shadow-md rounded-xl transition-all text-left animate-fade-in"
                   >
                     <div className="flex items-center space-x-1 mb-1">
                       <span className="font-extrabold text-gray-900 text-sm">{st.time}</span>

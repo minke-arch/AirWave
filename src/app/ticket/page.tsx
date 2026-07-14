@@ -1,29 +1,55 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import Link from "next/navigation";
 import { useRouter } from "next/navigation";
 import { Layout } from "../../components/Layout";
-import { useBooking, Reservation } from "../../context/BookingContext";
-import { dummyMovies } from "../../data/movies";
-import { ArrowLeft, Home, Calendar, Armchair, AlertCircle, Sparkles } from "lucide-react";
+import { useBooking, Reservation, Movie } from "../../context/BookingContext";
+import { ArrowLeft, Home, Calendar, Armchair, AlertCircle, Sparkles, Loader2 } from "lucide-react";
 
 export default function TicketPage() {
   const router = useRouter();
-  const { user, reservations, cancelReservation } = useBooking();
+  const { user, reservations, cancelReservation, fetchReservations, isLoadingReservations } = useBooking();
   const [toastMsg, setToastMsg] = useState<string>("");
+  const [recommendMovies, setRecommendMovies] = useState<Movie[]>([]);
+
+  // 1. Fetch recommend movies and refresh reservations on mount
+  useEffect(() => {
+    if (user) {
+      fetchReservations(user.email);
+    }
+
+    const fetchRecommendMovies = async () => {
+      try {
+        const res = await fetch("/api/movies");
+        const data = await res.json();
+        if (data.success) {
+          // 스파이더맨 제외하고 최대 2개 로드
+          const filtered = data.movies.filter((m: Movie) => m.id !== "spiderman").slice(0, 2);
+          setRecommendMovies(filtered);
+        }
+      } catch (err) {
+        console.error("추천 영화 조회 실패:", err);
+      }
+    };
+
+    fetchRecommendMovies();
+  }, [user]);
 
   // Filter reservations. Standard behaviour: show only RESERVED status for current logged-in user
   const activeReservations = reservations.filter((r) => {
-    const isUserMatch = !user || r.userEmail === user.email; // If logged in, match user. If anonymous guest, match guest
+    const isUserMatch = !user || r.userEmail === user.email; // If logged in, match user
     return isUserMatch && r.status === "RESERVED";
   });
 
-  const handleCancel = (resId: string) => {
+  const handleCancel = async (resId: string) => {
     if (confirm("정말로 이 예매를 취소하시겠습니까?")) {
-      cancelReservation(resId);
-      setToastMsg("예매가 정상적으로 취소되었습니다.");
-      setTimeout(() => setToastMsg(""), 3000);
+      const success = await cancelReservation(resId);
+      if (success) {
+        setToastMsg("예매가 정상적으로 취소되었습니다.");
+        setTimeout(() => setToastMsg(""), 3000);
+      } else {
+        alert("예매 취소 처리 중 오류가 발생했습니다.");
+      }
     }
   };
 
@@ -51,7 +77,6 @@ export default function TicketPage() {
           </button>
         </div>
 
-
         {/* Live Cancel Feedback Toast */}
         {toastMsg && (
           <div className="mx-4 mt-3 bg-neutral-900 text-white text-xs font-bold px-4 py-3 rounded-xl shadow-lg flex items-center space-x-2 animate-in fade-in slide-in-from-top-2 duration-150">
@@ -62,7 +87,12 @@ export default function TicketPage() {
 
         {/* Ticket List Content */}
         <div className="p-4 flex flex-col space-y-6">
-          {activeReservations.length === 0 ? (
+          {isLoadingReservations ? (
+            <div className="w-full flex flex-col items-center justify-center py-20">
+              <Loader2 className="w-8 h-8 animate-spin text-[#E71A0F] mb-2" />
+              <p className="text-[10px] text-gray-400 font-extrabold">티켓 정보를 동기화하고 있습니다...</p>
+            </div>
+          ) : activeReservations.length === 0 ? (
             // EMPTY STATE: Renders characters & recommendation
             <div className="flex flex-col items-center">
               
@@ -93,7 +123,7 @@ export default function TicketPage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  {dummyMovies.filter(m => m.id !== "spiderman").slice(0, 2).map((movie) => (
+                  {recommendMovies.map((movie) => (
                     <button
                       key={movie.id}
                       onClick={() => router.push(`/movies/${movie.id}`)}

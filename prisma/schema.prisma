@@ -1,0 +1,126 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// 1. 사용자 테이블
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  name         String
+  passwordHash String?       // 개발 단계에서는 선택적
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  reservations Reservation[]
+  temporaryHolds TemporaryHold[]
+}
+
+/// 2. 영화 테이블
+model Movie {
+  id            String     @id
+  title         String
+  poster        String
+  ageLimit      String     // "12", "15", "All", "Restricted"
+  runtime       String     // "2시간 36분"
+  genre         String
+  bookingRate   Float      @default(0.0) // 예매율 수치
+  audienceCount Int        @default(0)
+  createdAt     DateTime   @default(now())
+  showtimes     Showtime[]
+}
+
+/// 3. 극장 테이블
+model Theater {
+  id        String     @id @default(uuid())
+  name      String     // "무비웨이브 서울본점"
+  location  String
+  screens   Screen[]
+  showtimes Showtime[]
+}
+
+/// 4. 상영관 테이블
+model Screen {
+  id         String     @id @default(uuid())
+  theaterId  String
+  theater    Theater    @relation(fields: [theaterId], references: [id], onDelete: Cascade)
+  name       String     // "1관 2D", "3관 IMAX"
+  totalSeats Int        // 183
+  showtimes  Showtime[]
+  seats      Seat[]
+}
+
+/// 5. 물리 좌석 정보 테이블
+model Seat {
+  id        String   @id @default(uuid())
+  screenId  String
+  screen    Screen   @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  seatNo    String   // "A1", "A2", "H12" 등
+  grade     String   // "STANDARD", "PREMIUM", "DISABLED"
+  row       String   // "A", "B", "H"
+  col       Int      // 1, 2, 12
+  
+  @@unique([screenId, seatNo])
+}
+
+/// 6. 상영 스케줄 테이블
+model Showtime {
+  id         String           @id @default(uuid())
+  movieId    String
+  movie      Movie            @relation(fields: [movieId], references: [id], onDelete: Restrict)
+  theaterId  String
+  theater    Theater          @relation(fields: [theaterId], references: [id], onDelete: Restrict)
+  screenId   String
+  screen     Screen           @relation(fields: [screenId], references: [id], onDelete: Restrict)
+  date       String           // "2026-07-15"
+  startTime  String           // "10:30"
+  endTime    String           // "13:16"
+  createdAt  DateTime         @default(now())
+  
+  reservations   Reservation[]
+  temporaryHolds TemporaryHold[]
+}
+
+/// 7. 좌석 임시 선점 테이블 (결제 중인 좌석 10분 잠금)
+model TemporaryHold {
+  id         String   @id @default(uuid())
+  showtimeId String
+  showtime   Showtime @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seatNo     String   // 임시 선점할 좌석 번호
+  expiresAt  DateTime // 만료 시간
+  createdAt  DateTime @default(now())
+
+  @@unique([showtimeId, seatNo])
+}
+
+/// 8. 예매 내역 테이블
+model Reservation {
+  id         String            @id @default(uuid())
+  userId     String
+  user       User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  showtimeId String
+  showtime   Showtime          @relation(fields: [showtimeId], references: [id], onDelete: Restrict)
+  seats      String            // SQLite는 배열을 지원하지 않으므로 콤마(,)로 구분된 문자열로 저장 ("H12,H13")
+  totalPrice Int
+  status     String            @default("RESERVED") // "RESERVED", "CANCELLED"
+  bookedAt   DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  payment    Payment?
+}
+
+/// 9. 결제 정보 테이블
+model Payment {
+  id            String        @id @default(uuid())
+  reservationId String        @unique
+  reservation   Reservation   @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  method        String        // "CARD", "POINT", "EASY_PAY"
+  amount        Int
+  status        String        @default("COMPLETED") // "COMPLETED", "REFUNDED", "FAILED"
+  paidAt        DateTime      @default(now())
+}

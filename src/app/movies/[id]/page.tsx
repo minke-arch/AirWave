@@ -1,12 +1,11 @@
 "use client";
 
-import React, { use, useState } from "react";
+import React, { use, useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Layout } from "../../../components/Layout";
-import { dummyMovies } from "../../../data/movies";
 import { useBooking, Movie } from "../../../context/BookingContext";
-import { ArrowLeft, Home, Share2, Heart, Award, Users, Smile } from "lucide-react";
+import { ArrowLeft, Home, Share2, Heart, Award, Users, Smile, Loader2 } from "lucide-react";
 
 interface MovieDetailPageProps {
   params: Promise<{ id: string }>;
@@ -17,13 +16,45 @@ export default function MovieDetailPage({ params }: MovieDetailPageProps) {
   const { id } = use(params);
   const { selectMovie } = useBooking();
   const [isLiked, setIsLiked] = useState<boolean>(false);
+  const [movie, setMovie] = useState<Movie | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  const movie = dummyMovies.find((m) => m.id === id);
+  // Fetch movie details from DB on mount
+  useEffect(() => {
+    const fetchMovie = async () => {
+      setIsLoading(true);
+      try {
+        const res = await fetch("/api/movies");
+        const data = await res.json();
+        if (data.success) {
+          const matched = data.movies.find((m: Movie) => m.id === id);
+          setMovie(matched || null);
+        }
+      } catch (err) {
+        console.error("영화 상세 정보 조회 실패:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchMovie();
+  }, [id]);
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-[#111827] text-white min-h-screen">
+          <Loader2 className="w-8 h-8 animate-spin text-[#E71A0F] mb-2" />
+          <p className="text-[10px] text-gray-400 font-extrabold">상세 정보를 불러오고 있습니다...</p>
+        </div>
+      </Layout>
+    );
+  }
 
   if (!movie) {
     return (
       <Layout>
-        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white">
+        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-white min-h-screen">
           <p className="text-gray-500 font-bold">존재하지 않는 영화입니다.</p>
           <Link href="/" className="mt-4 text-[#E71A0F] font-bold text-sm underline">
             홈으로 돌아가기

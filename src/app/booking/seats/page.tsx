@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Layout } from "../../../components/Layout";
 import { useBooking } from "../../../context/BookingContext";
 import { SeatMap } from "../../../components/SeatMap";
-import { ArrowLeft, X, RefreshCw, HelpCircle, Minus, Plus } from "lucide-react";
+import { ArrowLeft, X, RefreshCw, HelpCircle, Minus, Plus, Loader2 } from "lucide-react";
 
 const ROWS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N"];
 
@@ -22,12 +22,15 @@ export default function SeatsPage() {
     toggleSeat,
     clearSeats,
     user,
+    holdSeats
   } = useBooking();
 
   const [showFullMap, setShowFullMap] = useState<boolean>(false);
   const [occupiedSeatsList, setOccupiedSeatsList] = useState<string[]>([]);
+  const [isLoadingSeats, setIsLoadingSeats] = useState<boolean>(true);
+  const [isHolding, setIsHolding] = useState<boolean>(false);
 
-  // Validate state and redirect back if movie/time isn't selected or user is not logged in
+  // 1. Validate state and Fetch latest seat map from Backend
   useEffect(() => {
     if (!selectedMovie || !selectedTime) {
       router.replace("/booking");
@@ -39,18 +42,34 @@ export default function SeatsPage() {
       return;
     }
 
-    // Load occupied seats for this specific movie, date & time from LocalStorage
-    if (typeof window !== "undefined") {
-      const storedOccupied = localStorage.getItem("movie_occupied_seats");
-      if (storedOccupied) {
-        const occupiedMap = JSON.parse(storedOccupied);
-        const occupiedKey = `${selectedMovie.id}_${selectedDate}_${selectedTime.time}`;
-        setOccupiedSeatsList(occupiedMap[occupiedKey] || []);
+    const fetchLatestSeats = async () => {
+      setIsLoadingSeats(true);
+      try {
+        const res = await fetch(`/api/showtimes/${selectedTime.id}`);
+        const data = await res.json();
+        if (data.success && data.showtime) {
+          // 타인에 의해 선점되었거나(HELD) 이미 확정 예매된(OCCUPIED) 좌석 필터링
+          const unavailableSeats: string[] = [];
+          data.showtime.seats.forEach((seat: any) => {
+            if (seat.status === "OCCUPIED") {
+              unavailableSeats.push(seat.seatNo);
+            } else if (seat.status === "HELD" && seat.heldBy !== user.id) {
+              unavailableSeats.push(seat.seatNo);
+            }
+          });
+          setOccupiedSeatsList(unavailableSeats);
+        }
+      } catch (err) {
+        console.error("최신 좌석 정보 조회 실패:", err);
+      } finally {
+        setIsLoadingSeats(false);
       }
-    }
+    };
+
+    fetchLatestSeats();
   }, [selectedMovie, selectedTime, selectedDate, user, router]);
 
-  if (!selectedMovie || !selectedTime) return null;
+  if (!selectedMovie || !selectedTime || !user) return null;
 
   const totalAttendeesCount = attendees.adult + attendees.youth;
 
@@ -68,9 +87,44 @@ export default function SeatsPage() {
     return `${dateStr.replace(/-/g, ".")} (${days[d.getDay()]})`;
   };
 
-  const handleNextStep = () => {
+  const handleNextStep = async () => {
     if (selectedSeats.length !== totalAttendeesCount || totalAttendeesCount === 0) return;
-    router.push("/booking/payment");
+    if (!selectedTime.id) {
+      alert("상영 정보가 올바르지 않습니다.");
+      return;
+    }
+    
+    setIsHolding(true);
+    try {
+      const result = await holdSeats(selectedTime.id, selectedSeats);
+      if (result.success) {
+        // 성공 시 결제창 이동
+        router.push("/booking/payment");
+      } else {
+        // 실패 시 에러 사유 알림
+        alert(result.message || "선택하신 좌석 중 이미 다른 사용자가 선점 중인 좌석이 포함되어 있습니다. 좌석을 다시 선택해 주세요.");
+        // 최신 좌석 맵 새로고침
+        const res = await fetch(`/api/showtimes/${selectedTime.id}`);
+        const data = await res.json();
+        if (data.success && data.showtime) {
+          const unavailableSeats: string[] = [];
+          data.showtime.seats.forEach((seat: any) => {
+            if (seat.status === "OCCUPIED") {
+              unavailableSeats.push(seat.seatNo);
+            } else if (seat.status === "HELD" && seat.heldBy !== user.id) {
+              unavailableSeats.push(seat.seatNo);
+            }
+          });
+          setOccupiedSeatsList(unavailableSeats);
+          clearSeats();
+        }
+      }
+    } catch (err) {
+      console.error("좌석 선점 과정 에러:", err);
+      alert("좌석 예약 처리 중 네트워크 오류가 발생했습니다.");
+    } finally {
+      setIsHolding(false);
+    }
   };
 
   return (
@@ -218,8 +272,13 @@ export default function SeatsPage() {
         </div>
 
         {/* Booking Interactive Panel */}
-        <div className="p-4 bg-gray-50 flex-1 flex flex-col">
-          {totalAttendeesCount === 0 ? (
+        <div className="p-4 bg-gray-50 flex-1 flex flex-col justify-center">
+          {isLoadingSeats ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-16">
+              <Loader2 className="w-8 h-8 animate-spin text-[#E71A0F] mb-2" />
+              <p className="text-[10px] text-gray-400 font-extrabold">좌석 정보를 불러오고 있습니다...</p>
+            </div>
+          ) : totalAttendeesCount === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center py-16 bg-white rounded-2xl border border-gray-100 shadow-sm text-center">
               <HelpCircle className="w-10 h-10 text-gray-300 mb-2" />
               <p className="text-xs text-gray-400 font-extrabold leading-relaxed">
@@ -306,14 +365,15 @@ export default function SeatsPage() {
 
           <button
             onClick={handleNextStep}
-            disabled={selectedSeats.length !== totalAttendeesCount || totalAttendeesCount === 0}
-            className={`px-8 py-3.5 rounded-xl text-sm font-extrabold transition-all shadow-md ${
-              selectedSeats.length === totalAttendeesCount && totalAttendeesCount > 0
+            disabled={selectedSeats.length !== totalAttendeesCount || totalAttendeesCount === 0 || isHolding}
+            className={`px-8 py-3.5 rounded-xl text-sm font-extrabold transition-all shadow-md flex items-center space-x-2 ${
+              selectedSeats.length === totalAttendeesCount && totalAttendeesCount > 0 && !isHolding
                 ? "bg-gradient-to-r from-[#FF5E3A] to-[#E71A0F] text-white shadow-rose-500/20 hover:scale-[1.02]"
                 : "bg-gray-200 text-gray-400 shadow-none cursor-not-allowed"
             }`}
           >
-            결제선택 &rsaquo;
+            {isHolding && <Loader2 className="w-4 h-4 animate-spin mr-1" />}
+            <span>결제선택 &rsaquo;</span>
           </button>
         </div>
 
