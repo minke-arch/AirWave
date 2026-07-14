@@ -3,8 +3,9 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Ticket, Bell, Search, Menu, User } from "lucide-react";
+import { Home, Ticket, Bell, Search, Menu, User, MessageSquare } from "lucide-react";
 import { useBooking } from "../context/BookingContext";
+import { MovieChatBot } from "./MovieChatBot";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -13,6 +14,7 @@ interface LayoutProps {
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const pathname = usePathname();
   const { user } = useBooking();
+  const [isChatOpen, setIsChatOpen] = React.useState(false);
 
   // Helper to determine if a route is active
   const isActive = (path: string) => {
@@ -25,6 +27,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     <div className="min-h-screen bg-slate-900 flex justify-center items-start md:py-8 font-sans antialiased selection:bg-rose-500 selection:text-white">
       {/* Centered Mobile App Shell */}
       <div className="w-full max-w-[480px] min-h-screen md:min-h-[850px] bg-white flex flex-col relative shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-x-hidden md:rounded-3xl border border-slate-800">
+        
+        {/* Movie Chatbot Bottom Drawer */}
+        <MovieChatBot isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
         
         {/* Global Top GNB */}
         <header className="sticky top-0 z-40 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
@@ -58,6 +63,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             {/* Search Icon */}
             <button className="p-1.5 rounded-full hover:bg-gray-100 transition-colors">
               <Search className="w-6 h-6 stroke-[1.8]" />
+            </button>
+
+            {/* AI Chatbot Icon */}
+            <button 
+              onClick={() => setIsChatOpen(true)}
+              className="p-1.5 rounded-full hover:bg-gray-100 transition-colors"
+              title="AI 영화 비서"
+            >
+              <MessageSquare className="w-6 h-6 stroke-[1.8] text-rose-500 animate-pulse" />
             </button>
           </div>
         </header>
